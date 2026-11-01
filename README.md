@@ -5,7 +5,7 @@
 Bir klasördeki dosyaları **seçtiğiniz türe** göre filtreleyip (fotoğraf, görsel,
 3D baskı dosyası, video, belge, arşiv, kod… veya tüm dosyalar), çekim/dosya
 tarihine göre otomatik olarak klasörlere ayıran, gece/gündüz temalı bir
-masaüstü uygulaması. **PySide6 (Qt)** ile yazılmıştır.
+masaüstü uygulaması. **PySide6 (Qt)** ile yazılmıştır. Tema ve özel bileşenler `breeze.py` dosyasındadır.
 
 [**Foto Tarihe Göre Ayır**](https://github.com/BuRsTFiRe47/foto-tarihe-gore-ayir)
 projesinin genel amaçlı fork'udur — aynı tarih motorunu korur, ama yalnızca
@@ -37,7 +37,8 @@ fotoğraflara değil, seçtiğiniz herhangi bir dosya türü grubuna uygulanır.
 - 🧲 Klasörü pencereye **sürükleyip bırakarak** seçebilirsiniz
 - 🔁 Aynı klasörü tekrar çalıştırmak güvenlidir: hedefte zaten aynısı olan dosyalar
   atlanır, hedef klasör tekrar taranmaz (`(1)` kopyaları oluşmaz)
-- 🌙☀️ Gece / Gündüz modu (varsayılan: gece, seçiminiz hatırlanır)
+- 🌙☀️ KDE **Breeze** esinli koyu/açık tema (arduvaz zemin, mercan vurgu; varsayılan: koyu, seçiminiz hatırlanır)
+- 🕘 Klasör alanlarında **son kullanılanlar** açılır listesi
 
 ## Kategoriler ve uzantıları
 
@@ -138,7 +139,8 @@ A general-purpose fork of [**Foto Tarihe Göre Ayır**](https://github.com/BuRsT
 - 👀 Dry-run preview, ⏹️ **Stop** button, 🧲 drag & drop folders onto the path fields
 - 🔁 Safe to re-run: files already present at the destination are skipped and the
   destination folder is not re-scanned (no `(1)` duplicates)
-- 🌙☀️ Dark / Light mode (defaults to dark, your choice is remembered)
+- 🌙☀️ KDE **Breeze**-inspired dark/light theme (slate background, coral accent; defaults to dark, remembered)
+- 🕘 Recent-folders dropdown on the folder fields
 
 ### Download
 
