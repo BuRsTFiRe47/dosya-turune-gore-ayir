@@ -13,6 +13,12 @@ Filters files in a folder by TYPE (photo, image/design, 3D-print file, video,
 document, archive, code ... or all files) and copies/moves them into new
 folders based on capture/file date.
 
+Yeni (1.7): "Türe göre klasörle" düzeni — veri kurtarma çıktıları gibi karışık
+yığınları Fotoğraf / Video / Belgeler / … klasörlerine ayırır; uzantısız dosyaları
+içeriğinden (sihirli baytlardan) tanır.
+New (1.7): "Folder by type" layout — sorts messy data-recovery dumps into
+Photos / Videos / Documents / … folders and identifies extensionless files by content.
+
 Gereksinimler / Requirements:
     pip install PySide6 pillow
 
@@ -23,6 +29,7 @@ Gereksinimler / Requirements:
 import os
 import shutil
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -52,7 +59,7 @@ from breeze import (  # ortak Breeze teması (koyu arduvaz + mercan vurgu)
 )
 
 APP_TITLE = "Dosya Türüne Göre Ayır"
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.7.0"
 SETTINGS_ORG = "BuRsTFiRe47"
 SETTINGS_APP = "DosyaTuruneGoreAyir"
 
@@ -221,6 +228,183 @@ def _norm(path) -> str:
     return os.path.normcase(os.path.realpath(str(path)))
 
 
+# ---------------------------------------------------------------------------
+# Türe göre klasörleme / Folder-by-type
+# ---------------------------------------------------------------------------
+# Klasör adı -> uzantı kümesi (ilk eşleşen kazanır). "Diğer" ve "Boş Dosyalar" özel.
+TYPE_FOLDERS = {
+    "Fotoğraflar": PHOTO_EXTS,
+    "Görseller (Tasarım)": IMAGE_DESIGN_EXTS,
+    "3D Baskı": PRINT3D_EXTS,
+    "Videolar": VIDEO_EXTS,
+    "Ses": AUDIO_EXTS,
+    "Belgeler": DOCUMENT_EXTS,
+    "Arşivler": ARCHIVE_EXTS,
+    "Kod": CODE_EXTS,
+    "E-posta": MAIL_EXTS,
+}
+OTHER_FOLDER = "Diğer"
+EMPTY_FOLDER = "Boş Dosyalar"
+NOEXT_FOLDER = "uzantısız"
+
+LAYOUTS = {
+    "Tarihe göre  (Yıl/Ay/Gün …)": "date",
+    "Türe göre  (Fotoğraflar, Videolar, Belgeler …)": "type",
+    "Türe göre, içinde tarihe göre  (Videolar/2026/08 …)": "type_date",
+}
+
+_EXT_TO_FOLDER = {e: name for name, exts in reversed(list(TYPE_FOLDERS.items())) for e in exts}
+
+
+def folder_for_ext(ext: str) -> Optional[str]:
+    return _EXT_TO_FOLDER.get(ext.lower())
+
+
+def safe_ext(ext: str) -> str:
+    """Klasör adı olarak kullanılabilir uzantı: '.JPG' -> 'jpg'; garip karakterler atılır."""
+    e = "".join(c for c in ext.lower().lstrip(".") if c.isalnum())[:12]
+    return e or NOEXT_FOLDER
+
+
+def sniff_ext(path: Path) -> Optional[str]:
+    """Dosya içeriğinden (sihirli baytlar) uzantı tahmini; bulunamazsa None.
+    Veri kurtarma yazılımlarının uzantısız/yanlış adlandırdığı dosyalar için."""
+    try:
+        with open(path, "rb") as f:
+            h = f.read(4096)
+    except OSError:
+        return None
+    if len(h) < 4:
+        return None
+    if h.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if h.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if h.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
+    if h.startswith((b"II*\x00", b"MM\x00*")):
+        return ".tif"
+    if h[:2] == b"BM" and len(h) > 14 and h[6:10] == b"\x00\x00\x00\x00":
+        return ".bmp"
+    if h.startswith(b"RIFF") and len(h) >= 12:
+        kind = h[8:12]
+        return {b"WEBP": ".webp", b"WAVE": ".wav", b"AVI ": ".avi"}.get(kind)
+    if h.startswith(b"%PDF"):
+        return ".pdf"
+    if h.startswith(b"PK\x03\x04"):
+        if b"word/" in h:
+            return ".docx"
+        if b"xl/" in h:
+            return ".xlsx"
+        if b"ppt/" in h:
+            return ".pptx"
+        return ".zip"
+    if h.startswith(b"Rar!\x1a\x07"):
+        return ".rar"
+    if h.startswith(b"7z\xbc\xaf\x27\x1c"):
+        return ".7z"
+    if h.startswith(b"\x1f\x8b"):
+        return ".gz"
+    if h.startswith(b"BZh"):
+        return ".bz2"
+    if h[4:8] == b"ftyp":
+        brand = h[8:12]
+        if brand in (b"heic", b"heix", b"hevc", b"mif1", b"heim"):
+            return ".heic"
+        if brand == b"qt  ":
+            return ".mov"
+        if brand.startswith(b"3g"):
+            return ".3gp"
+        if brand in (b"M4A ", b"M4B "):
+            return ".m4a"
+        return ".mp4"
+    if h.startswith(b"ID3") or h[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+        return ".mp3"
+    if h.startswith(b"OggS"):
+        return ".ogg"
+    if h.startswith(b"fLaC"):
+        return ".flac"
+    if h.startswith(b"\x1a\x45\xdf\xa3"):
+        return ".mkv"
+    if h.startswith(b"FLV\x01"):
+        return ".flv"
+    if h.startswith(b"\x00\x00\x01\xba"):
+        return ".mpg"
+    if h.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+        return ".doc"
+    if h.startswith(b"{\\rtf"):
+        return ".rtf"
+    if h.startswith(b"SQLite format 3\x00"):
+        return ".sqlite"
+    if h.startswith(b"MZ"):
+        return ".exe"
+    if h.startswith(b"\x7fELF"):
+        return ".elf"
+    if h.startswith(b"%!PS"):
+        return ".eps"
+    if h.startswith(b"8BPS"):
+        return ".psd"
+    # düz metin mi?  (NUL yok, UTF-8 / Windows-1254 olarak okunabilir)
+    if b"\x00" not in h:
+        head = h.lstrip(b"\xef\xbb\xbf")
+        low = head[:200].lstrip().lower()
+        if low.startswith(b"<?xml"):
+            return ".xml"
+        if low.startswith((b"<!doctype html", b"<html")):
+            return ".html"
+        try:
+            head.decode("utf-8")
+            return ".txt"
+        except UnicodeDecodeError as e:
+            if e.start >= len(head) - 4:       # 4 KB sınırında kesilen çok baytlı karakter
+                return ".txt"
+            printable = sum(1 for b in head if b in (9, 10, 13) or 32 <= b < 127 or b >= 0xA0)
+            if printable / len(head) > 0.95:   # Windows-1254 / Latin-1 metin
+                return ".txt"
+    return None
+
+
+def type_destination(cfg, p: Path):
+    """Türe göre hedef alt yolu ve dosya adı. -> (parçalar, dosya_adı, tanınan_uzantı_mı)"""
+    name = p.name
+    ext = p.suffix.lower()
+    try:
+        if cfg.empty_sep and p.stat().st_size == 0:
+            return [EMPTY_FOLDER], name, False
+    except OSError:
+        pass
+    folder = folder_for_ext(ext)
+    sniffed = False
+    if folder is None and cfg.sniff:
+        guess = sniff_ext(p)
+        if guess:
+            folder = folder_for_ext(guess) or OTHER_FOLDER
+            sniffed = True
+            if not ext and cfg.add_ext:
+                name = p.name + guess
+            ext = guess                      # alt klasör adı tanınan uzantıdan gelsin
+    parts = [folder or OTHER_FOLDER]
+    if cfg.ext_sub:
+        parts.append(safe_ext(ext))
+    return parts, name, sniffed
+
+
+def remove_empty_dirs(root: str, dest: str) -> int:
+    """Taşıma sonrası boşalan kaynak alt klasörlerini siler (yalnızca gerçekten boş olanları)."""
+    removed = 0
+    rn, dn = _norm(root), _norm(dest)
+    for r, _dirs, _files in os.walk(root, topdown=False):
+        n = _norm(r)
+        if n == rn or n == dn or n.startswith(dn + os.sep):
+            continue
+        try:
+            os.rmdir(r)
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
 @dataclass
 class SortConfig:
     source: str
@@ -234,6 +418,12 @@ class SortConfig:
     dry_run: bool
     prefix: bool
     reverse: bool
+    layout: str = "date"          # "date" | "type" | "type_date"
+    ext_sub: bool = False         # Fotoğraflar/jpg gibi uzantı alt klasörü
+    sniff: bool = False           # uzantısız/bilinmeyen dosyaları içeriğinden tanı
+    add_ext: bool = False         # uzantısız dosyaya tanınan uzantıyı ekle
+    empty_sep: bool = True        # 0 baytlıları "Boş Dosyalar"a koy
+    clean_empty: bool = False     # taşıma sonrası boş kaynak klasörleri sil
 
 
 class SortWorker(QObject):
@@ -279,6 +469,7 @@ class SortWorker(QObject):
     def run(self):
         cfg = self.cfg
         ok = err = skipped = 0
+        counts = Counter()
         try:
             files = self._collect()
             if not files:
@@ -286,13 +477,15 @@ class SortWorker(QObject):
                 self.done.emit(0, 0, 0, cfg.dry_run, False)
                 return
 
-            self.log.emit(f"'{cfg.category}' kategorisinde {len(files)} dosya bulundu, tarihler okunuyor…")
+            need_date = cfg.layout in ("date", "type_date")
+            self.log.emit(f"'{cfg.category}' kategorisinde {len(files)} dosya bulundu"
+                          + (", tarihler okunuyor…" if need_date else "."))
             dated = []
             for p in files:
                 if self._cancel:
                     break
                 try:
-                    dated.append((get_item_date(p, cfg.use_exif), p))
+                    dated.append((get_item_date(p, cfg.use_exif) if need_date else None, p))
                 except OSError as e:
                     err += 1
                     self.log.emit(f"HATA ({p.name}): {e}")
@@ -301,10 +494,13 @@ class SortWorker(QObject):
                 self.done.emit(ok, err, skipped, cfg.dry_run, True)
                 return
 
-            dated.sort(key=lambda t: (t[0], str(t[1])), reverse=cfg.reverse)
+            if need_date:
+                dated.sort(key=lambda t: (t[0], str(t[1])), reverse=cfg.reverse)
+            else:
+                dated.sort(key=lambda t: str(t[1]).lower())
 
             prefix_map = {}
-            if cfg.prefix:
+            if cfg.prefix and cfg.layout == "date":
                 order, seen = [], set()
                 for dt, _p in dated:
                     name = format_folder_name(dt, cfg.pattern)
@@ -323,33 +519,51 @@ class SortWorker(QObject):
                     self.log.emit("Durduruldu.")
                     break
                 try:
-                    folder = format_folder_name(dt, cfg.pattern)
-                    if cfg.prefix:
-                        folder = prefix_map[folder]
-                    parts = [x for x in folder.replace("\\", "/").split("/") if x]
+                    new_name = p.name
+                    parts = []
+                    if cfg.layout in ("type", "type_date"):
+                        parts, new_name, _sn = type_destination(cfg, p)
+                    if cfg.layout in ("date", "type_date") and not (parts and parts[0] == EMPTY_FOLDER):
+                        folder = format_folder_name(dt, cfg.pattern)
+                        if cfg.prefix and cfg.layout == "date":
+                            folder = prefix_map[folder]
+                        parts += [x for x in folder.replace("\\", "/").split("/") if x]
                     target_dir = dest_p.joinpath(*parts)
-                    target = target_dir / p.name
+                    target = target_dir / new_name
 
                     if cfg.dry_run:
-                        self.log.emit(f"[ÖNİZLEME] {p.name}  →  {target_dir}")
+                        if total <= 3000 or i % 10 == 0:   # dev listelerde günlüğü şişirme
+                            self.log.emit(f"[ÖNİZLEME] {p.name}  →  {'/'.join(parts)}/{new_name}")
                     else:
                         target_dir.mkdir(parents=True, exist_ok=True)
                         if target.exists() and already_in_place(p, target):
                             skipped += 1
                             self.log.emit(f"{p.name}  (hedefte zaten var, atlandı)")
-                            self.progress.emit(i, total)
+                            if i % 25 == 0 or i == total:
+                                self.progress.emit(i, total)
                             continue
                         target = unique_destination(target)
                         if cfg.move:
                             shutil.move(str(p), str(target))
                         else:
                             shutil.copy2(str(p), str(target))
-                        self.log.emit(f"{p.name}  →  {target}")
+                        if total <= 3000 or i % 10 == 0:
+                            self.log.emit(f"{p.name}  →  {target}")
+                    counts[parts[0] if parts else ""] += 1
                     ok += 1
                 except Exception as e:  # tek dosya hatası tüm işlemi durdurmasın
                     err += 1
                     self.log.emit(f"HATA ({p.name}): {e}")
-                self.progress.emit(i, total)
+                if i % 25 == 0 or i == total:   # 36 bin dosyada arayüzü boğma
+                    self.progress.emit(i, total)
+
+            if cfg.layout != "date" and counts:
+                self.log.emit("\nKlasör özeti:")
+                for name, n in counts.most_common():
+                    self.log.emit(f"  {name}: {n}")
+            if cfg.move and cfg.clean_empty and not cfg.dry_run and not cancelled:
+                n = remove_empty_dirs(cfg.source, cfg.dest)
+                self.log.emit(f"Boşalan {n} kaynak klasörü silindi.")
             self.done.emit(ok, err, skipped, cfg.dry_run, cancelled)
         except Exception as e:
             self.log.emit(f"BEKLENMEYEN HATA: {e}")
@@ -535,7 +749,7 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        outer.addWidget(self._make_header("Dosyaları seçtiğiniz türe göre filtreleyip tarihe göre klasörlere ayırır"))
+        outer.addWidget(self._make_header("Dosyaları türe ve/veya tarihe göre klasörlere ayırır — veri kurtarma yığınları için de"))
 
         # Kaydırılabilir kartlar
         scroll = QScrollArea()
@@ -575,8 +789,34 @@ class MainWindow(QMainWindow):
         card.wide(self.ext_label)
         body.addWidget(card)
 
+        # -- Klasörleme düzeni --
+        card = Card("Klasörleme Düzeni")
+        self.layout_combo = Combo()
+        self.layout_combo.addItems(list(LAYOUTS.keys()))
+        self.layout_combo.currentTextChanged.connect(self._on_layout_change)
+        card.row("Düzen", self.layout_combo)
+        self.ext_sub_cb = Check("Uzantıya göre alt klasör aç  (Fotoğraflar/jpg, Belgeler/pdf …)")
+        card.wide(self.ext_sub_cb)
+        self.sniff_cb = Check("Uzantısız / bilinmeyen dosyaları içeriğinden tanı")
+        self.sniff_cb.setChecked(True)
+        card.wide(self.sniff_cb)
+        self.addext_cb = Check("Uzantısız dosyalara tanınan uzantıyı ekle  (f123 → f123.jpg)")
+        card.wide(self.addext_cb)
+        self.empty_cb = Check("Boş (0 bayt) dosyaları ayrı klasöre koy")
+        self.empty_cb.setChecked(True)
+        card.wide(self.empty_cb)
+        self.clean_cb = Check("Taşıdıktan sonra boşalan kaynak klasörleri sil")
+        card.wide(self.clean_cb)
+        self.layout_hint = QLabel("Veri kurtarma çıktıları için: kategoriyi 'Tüm Dosyalar' seçip 'Türe göre' düzenini kullanın.")
+        self.layout_hint.setObjectName("hint")
+        self.layout_hint.setWordWrap(True)
+        card.wide(self.layout_hint)
+        body.addWidget(card)
+
         # -- Tarih ayarları --
+        self.date_cards = []
         card = Card("Tarih Ayarları")
+        self.date_cards.append(card)
         self.exif_cb = Check("Önce EXIF çekim tarihini kullan (yoksa dosya tarihi)")
         self.exif_cb.setChecked(True)
         card.wide(self.exif_cb)
@@ -595,6 +835,7 @@ class MainWindow(QMainWindow):
 
         # -- Sıralama --
         card = Card("Sıralama")
+        self.date_cards.append(card)
         self.order_combo = Combo()
         self.order_combo.addItems(["Eskiden yeniye", "Yeniden eskiye"])
         card.row("İşlem yönü", self.order_combo)
@@ -638,6 +879,7 @@ class MainWindow(QMainWindow):
 
         self._on_category_change(self.category_combo.currentText())
         self._on_preset_change(self.preset_combo.currentText())
+        self._on_layout_change(self.layout_combo.currentText())
 
     # ----- olaylar -----
     def _on_category_change(self, name: str):
@@ -647,6 +889,20 @@ class MainWindow(QMainWindow):
         exif_useful = exts is None or bool(exts & PHOTO_EXTS)
         self.exif_cb.setEnabled(exif_useful)
         self.exif_cb.update()
+
+    def _on_layout_change(self, label: str):
+        layout = LAYOUTS.get(label, "date")
+        is_type = layout in ("type", "type_date")
+        for w in (self.ext_sub_cb, self.sniff_cb, self.addext_cb, self.empty_cb):
+            w.setEnabled(is_type)
+            w.update()
+        self.layout_hint.setVisible(is_type)
+        for card in self.date_cards:          # saf "türe göre"de tarih ayarları anlamsız
+            card.setEnabled(layout != "type")
+        self.prefix_cb.setEnabled(layout == "date")
+        self.prefix_cb.update()
+        if is_type and self.category_combo.currentText() != "Tüm Dosyalar":
+            self.category_combo.setCurrentText("Tüm Dosyalar")
 
     def _on_preset_change(self, label: str):
         pattern = FORMAT_PRESETS.get(label, "CUSTOM")
@@ -718,6 +974,12 @@ class MainWindow(QMainWindow):
             use_exif=self.exif_cb.isChecked() and self.exif_cb.isEnabled(),
             move=move, dry_run=dry, prefix=self.prefix_cb.isChecked(),
             reverse=self.order_combo.currentText() == "Yeniden eskiye",
+            layout=LAYOUTS[self.layout_combo.currentText()],
+            ext_sub=self.ext_sub_cb.isChecked(),
+            sniff=self.sniff_cb.isChecked(),
+            add_ext=self.addext_cb.isChecked(),
+            empty_sep=self.empty_cb.isChecked(),
+            clean_empty=self.clean_cb.isChecked(),
         )
 
         self._running = True

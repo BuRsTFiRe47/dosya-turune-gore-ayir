@@ -22,6 +22,12 @@ fotoğraflara değil, seçtiğiniz herhangi bir dosya türü grubuna uygulanır.
 
 ## Özellikler
 
+- 🧰 **Türe göre klasörleme (v1.7)** — veri kurtarma çıktıları gibi karışık yığınlar için:
+  `Fotoğraflar`, `Videolar`, `Belgeler`, `Ses`, `Arşivler`, `Kod`, `3D Baskı`, `Diğer` klasörlerine
+  ayırır (isteğe bağlı: uzantıya göre alt klasör `Fotoğraflar/jpg`, ya da tür + tarih)
+- 🔍 **Uzantısız / bilinmeyen dosyaları içeriğinden tanır** (JPEG, PNG, PDF, MP4, ZIP, DOCX, MP3, düz metin …)
+  ve istenirse dosya adına uzantıyı ekler; 0 baytlık dosyaları `Boş Dosyalar`a ayırır
+- 🧹 Taşıma sonrası boşalan kaynak klasörleri (ör. `recup_dir.1…`) silebilir; 36 binden fazla dosyada da akıcıdır
 - 🗂️ **Dosya kategorisi seçimi** — Fotoğraf, Görsel (Tasarım/Grafik), Görsel + Fotoğraf,
   3D Baskı Dosyaları, Video, Ses, Belgeler, Arşivler, Kod/Geliştirici Dosyaları,
   E-posta veya Tüm Dosyalar
@@ -127,6 +133,12 @@ A general-purpose fork of [**Foto Tarihe Göre Ayır**](https://github.com/BuRsT
 
 ### Features
 
+- 🧰 **Folder by type (v1.7)** — for messy piles such as data-recovery output: sorts into `Fotoğraflar`
+  (photos), `Videolar`, `Belgeler`, `Ses`, `Arşivler`, `Kod`, `3D Baskı`, `Diğer`; optional extension
+  sub-folders (`Fotoğraflar/jpg`) or type + date
+- 🔍 **Identifies extensionless / unknown files by content** (JPEG, PNG, PDF, MP4, ZIP, DOCX, MP3, plain text …),
+  can append the extension, and puts 0-byte files in `Boş Dosyalar`
+- 🧹 Can remove emptied source folders (e.g. `recup_dir.1…`) after moving; stays smooth with 36k+ files
 - 🗂️ **Category picker** — Photo, Image (Design/Graphics), Image + Photo, 3D-Print Files,
   Video, Audio, Documents, Archives, Code, Mail, or All Files
 - 📅 EXIF capture date or file modified date (EXIF checkbox disables itself for
